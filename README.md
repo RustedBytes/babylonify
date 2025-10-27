@@ -1,50 +1,69 @@
 # babylonify
 
-A small CLI to filter rows in a Parquet file by the detected language of a text column. It relies on [lingua](https://github.com/pemistahl/lingua-rs) for language detection, [polars](https://pola.rs) for columnar data manipulation, and uses Rayon to process rows in parallel. Optionally the tool can clean the text, keeping only alphabetic and punctuation symbols before detection.
+Babylonify filters rows in a Parquet file (or an entire directory of Parquet files) by the language detected in a text column. It wraps [lingua](https://github.com/pemistahl/lingua-rs) for language detection, [polars](https://pola.rs) for columnar IO, and [Rayon](https://github.com/rayon-rs/rayon) for parallelism, producing compressed Parquet output with Zstandard.
 
-## Features
-- Detects language for each row in a Parquet column and keeps only the rows matching a target language.
-- Accepts ISO 639-1 codes (`uk`, `en`, `ru`, etc.) as well as language names (`Ukrainian`, `English`, …).
-- Optional text cleaning step that trims whitespace and drops numbers/symbols before detection.
-- Parallel processing with Rayon and compressed Parquet output using Zstandard.
-- Handy CLI powered by `clap`, with sensible defaults for transcription-like datasets.
+## Highlights
+- Detects the language for every row and retains only those matching the requested language.
+- Accepts both ISO 639-1 codes (`uk`, `en`, `ru`, …) and language names (`Ukrainian`, `English`, `русский`, …).
+- Optional cleaning step removes numbers/emojis/symbols before detection so you can focus on alphabetic content.
+- Scales to many files: point the CLI at a directory and it mirrors the structure to an output directory.
+- Parallel row processing and streaming Parquet writers keep large datasets responsive.
 
-## Prerequisites
-- Rust toolchain with edition 2024 support (install via [`rustup`](https://rustup.rs/)).
-- Parquet files that contain the text data to filter.
+## Requirements
+- Rust toolchain with edition 2024 support installed via [`rustup`](https://rustup.rs/).
+- Input Parquet files containing at least one string column with textual data.
 
-## Installation
+## Install
 ```bash
+# from a local checkout
 cargo install --path .
-```
-You can also point `cargo install` at a checked-out path of this repository to build locally in release mode.
 
-## Usage
+# alternatively, build locally without installing
+cargo build --release
+```
+After installation the `babylonify` binary is placed on your Cargo bin path (`~/.cargo/bin` by default).
+
+## Quick start
+Filter a single Parquet file, keeping Ukrainian rows from the default `transcription` column and cleaning the text before detection:
 ```bash
 babylonify \
-  --input data.parquet \
-  --output data_uk.parquet \
+  --input data/transcripts.parquet \
+  --output data/transcripts_uk.parquet \
   --lang uk \
-  --column transcription \
   --clean
 ```
 
-### CLI options
+Batch-process every Parquet file in a directory. Outputs reuse the input file names within the provided output directory:
+```bash
+babylonify \
+  --input-dir data/raw/ \
+  --output data/filtered/ \
+  --lang english
+```
+
+## CLI reference
+Run `babylonify --help` for the authoritative list. The most important options are:
+
 | Flag | Description |
 | ---- | ----------- |
-| `-i, --input <PATH>` | Path to the source Parquet file. |
-| `-o, --output <PATH>` | Where to write the filtered Parquet file. |
-| `-c, --column <NAME>` | Column holding the text to inspect (default: `transcription`). |
-| `-l, --lang <LANG>` | Target language, accepts ISO code or language name (default: `uk`). |
-| `--threads <N>` | Limit Rayon to `N` worker threads. |
-| `--keep-empty` | Keep rows where the text column is empty or null. |
-| `--clean` | Clean text by removing non-letter, non-punctuation symbols before detection. |
+| `-i, --input <PATH>` | Parquet file to filter. Mutually exclusive with `--input-dir`. |
+| `--input-dir <DIR>` | Process every Parquet file in a directory (recursively only across the top level). |
+| `-o, --output <PATH|DIR>` | Output Parquet path. When used with `--input-dir`, this must be a directory and files are written with their original names. |
+| `-c, --column <NAME>` | Name of the text column to inspect. Defaults to `transcription`. |
+| `-l, --lang <LANG>` | Target language to keep. ISO codes, common aliases, and full names (case-insensitive) are accepted. Default: `uk`. |
+| `--keep-empty` | Preserve rows where the text column is `NULL` or an empty string. |
+| `--clean` | Normalize whitespace and strip non-letter/non-punctuation symbols before detection; the cleaned text replaces the original column in the output. |
+| `--threads <N>` | Limit the Rayon thread pool to `N` workers if you need deterministic parallelism. |
 
-The output Parquet file keeps the original schema; when `--clean` is enabled the text column is replaced with the cleaned content.
+The output Parquet schema matches the input schema; when `--clean` is supplied the specified text column is replaced with the cleaned content.
+
+### Language aliases
+Short codes and localized names for Ukrainian, English, Russian, Polish, German, French, and Spanish are recognized. Any other lingua-supported language can be addressed using its English enum name (for example `italian`, `portuguese`). Unknown values yield a helpful error.
 
 ## Development
-- Run the test suite before contributing: `cargo test`.
-- Format and lint using the standard Rust tooling (`cargo fmt`, `cargo clippy`) if you make changes.
+- Run the test suite: `cargo test`.
+- Format and lint with the Rust standard tooling: `cargo fmt` and `cargo clippy`.
+- The integration tests under `tests/cli.rs` exercise the end-to-end CLI against synthetic Parquet fixtures.
 
 ## License
-This project is distributed under the terms of the MIT License. See `LICENSE` (if provided) for details.
+Babylonify is distributed under the MIT License. See `LICENSE` for the full text.

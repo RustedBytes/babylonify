@@ -1,11 +1,15 @@
 use anyhow::{Context, Result, anyhow};
-use clap::{ArgAction, Parser, ValueHint};
+use clap::{ArgAction, ArgGroup, Parser, ValueHint};
 use lingua::{Language, LanguageDetector, LanguageDetectorBuilder};
 use once_cell::sync::Lazy;
 use polars::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
-use std::{fs::File, path::PathBuf, sync::Arc};
+use std::{
+    fs::{self, File},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Filter a Parquet file by detected language using lingua + polars + rayon.
 /// Optionally cleans transcriptions by removing non-alphabetic and non-punctuation symbols.
@@ -22,14 +26,19 @@ use std::{fs::File, path::PathBuf, sync::Arc};
 #[command(
     name = "babylonify",
     version,
-    about = "Filter Parquet rows by detected language using lingua + polars (+ optional cleaning)"
+    about = "Filter Parquet rows by detected language using lingua + polars (+ optional cleaning)",
+    group(ArgGroup::new("input_source").required(true).args(&["input", "input_dir"]))
 )]
 struct Cli {
     /// Input Parquet file path
     #[arg(short, long, value_hint = ValueHint::FilePath)]
-    input: PathBuf,
+    input: Option<PathBuf>,
 
-    /// Output Parquet file path
+    /// Input directory with Parquet files
+    #[arg(long, value_hint = ValueHint::DirPath)]
+    input_dir: Option<PathBuf>,
+
+    /// Output Parquet file path (or directory when --input-dir is used)
     #[arg(short, long, value_hint = ValueHint::FilePath)]
     output: PathBuf,
 
@@ -112,8 +121,97 @@ fn main() -> Result<()> {
     let target_lang = parse_language(&cli.lang)?;
     let detector = Arc::new(build_detector());
 
+    match (&cli.input, &cli.input_dir) {
+        (Some(input_path), None) => {
+            process_file(input_path, &cli.output, &cli, target_lang, &detector)?
+        }
+        (None, Some(input_dir)) => {
+            process_directory(input_dir, &cli.output, &cli, target_lang, &detector)?
+        }
+        _ => unreachable!("clap enforces that exactly one input source is provided"),
+    }
+
+    Ok(())
+}
+
+fn process_directory(
+    input_dir: &Path,
+    output_dir: &Path,
+    cli: &Cli,
+    target_lang: Language,
+    detector: &Arc<LanguageDetector>,
+) -> Result<()> {
+    if output_dir.exists() {
+        if !output_dir.is_dir() {
+            return Err(anyhow!(
+                "Output path '{:?}' must be a directory when --input-dir is used",
+                output_dir
+            ));
+        }
+    } else {
+        fs::create_dir_all(output_dir).with_context(|| {
+            format!(
+                "Failed to create output directory at '{}'",
+                output_dir.display()
+            )
+        })?;
+    }
+
+    let mut files: Vec<PathBuf> = fs::read_dir(input_dir)
+        .with_context(|| format!("Failed to read input directory '{}'", input_dir.display()))?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if entry.file_type().ok()?.is_file()
+                && path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("parquet"))
+                    .unwrap_or(false)
+            {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    files.sort();
+
+    if files.is_empty() {
+        return Err(anyhow!(
+            "No Parquet files found in input directory '{}'",
+            input_dir.display()
+        ));
+    }
+
+    for input_path in files {
+        let file_name = input_path
+            .file_name()
+            .ok_or_else(|| anyhow!("Invalid file name for '{:?}'", input_path))?;
+        let output_path = output_dir.join(file_name);
+        process_file(&input_path, &output_path, cli, target_lang, detector)?;
+    }
+
+    Ok(())
+}
+
+fn process_file(
+    input_path: &Path,
+    output_path: &Path,
+    cli: &Cli,
+    target_lang: Language,
+    detector: &Arc<LanguageDetector>,
+) -> Result<()> {
+    if output_path.exists() && output_path.is_dir() {
+        return Err(anyhow!(
+            "Output path '{:?}' points to a directory. Provide a file path instead.",
+            output_path
+        ));
+    }
+
     // Read parquet file
-    let file = File::open(&cli.input)?;
+    let file = File::open(input_path)?;
     let reader = ParquetReader::new(file);
     let df = reader.finish()?;
 
@@ -163,17 +261,19 @@ fn main() -> Result<()> {
 
     // Write output
     let mut out_file =
-        File::create(&cli.output).with_context(|| format!("Cannot create {:?}", &cli.output))?;
+        File::create(output_path).with_context(|| format!("Cannot create {:?}", output_path))?;
     ParquetWriter::new(&mut out_file)
         .with_compression(ParquetCompression::Zstd(None))
         .finish(&mut filtered)?;
 
     println!(
-        "✅ Filtered {} rows -> {} rows kept (lang = {:?}, cleaned = {})",
+        "✅ Filtered {} rows -> {} rows kept (lang = {:?}, cleaned = {}) [{} -> {}]",
         mask.len(),
         filtered.height(),
         target_lang,
-        cli.clean
+        cli.clean,
+        input_path.display(),
+        output_path.display()
     );
 
     Ok(())
