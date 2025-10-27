@@ -152,7 +152,12 @@ fn main() -> Result<()> {
     let mut filtered = df.filter(&mask_ch)?;
 
     if cli.clean {
-        let cleaned_series = Series::new((&cli.column).into(), processed);
+        let cleaned_filtered: Vec<Option<String>> = processed
+            .into_iter()
+            .zip(mask.iter())
+            .filter_map(|(value, keep)| if *keep { Some(value) } else { None })
+            .collect();
+        let cleaned_series = Series::new((&cli.column).into(), cleaned_filtered);
         filtered.with_column(cleaned_series)?;
     }
 
