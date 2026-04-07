@@ -264,7 +264,7 @@ fn print_summary(
     target_langs: &HashSet<Language>,
     cleaned: bool,
 ) {
-    println!(
+    info!(
         "✅ Filtered {} rows -> {} rows kept (langs = {:?}, cleaned = {}) [{} -> {}]",
         total_rows,
         kept_rows,
