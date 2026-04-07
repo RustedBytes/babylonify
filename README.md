@@ -59,7 +59,7 @@ Run `babylonify --help` for the authoritative list. The most important options a
 | ---- | ----------- |
 | `-i, --input <PATH>` | Parquet file to filter, or a directory of Parquet files to batch-process. |
 | `--input-dir <DIR>` | Compatibility alias for `--input <DIR>`. |
-| `-o, --output <PATH|DIR>` | Output Parquet path. When the input is a directory, this must be a directory and files are written with their original names. |
+| `-o, --output <PATH/DIR>` | Output Parquet path. When the input is a directory, this must be a directory and files are written with their original names. |
 | `-c, --column <NAME>` | Name of the text column to inspect. Defaults to `transcription`. |
 | `-l, --lang <LANG>` | Target language to keep. Repeat the flag to allow multiple languages. ISO codes, common aliases, and full names (case-insensitive) are accepted. Default: `uk`. |
 | `--keep-empty` | Preserve rows where the text column is `NULL` or an empty string. |
