@@ -46,6 +46,7 @@ Keep several languages by repeating `--lang`:
 babylonify \
   --input cv22-opus-speech/ \
   --output cv22-opus-speech-filtered \
+  --output-invalid cv22-opus-speech-rejected \
   --lang uk \
   --lang en \
   --lang ru \
@@ -60,11 +61,13 @@ Run `babylonify --help` for the authoritative list. The most important options a
 | `-i, --input <PATH>` | Parquet file to filter, or a directory of Parquet files to batch-process. |
 | `--input-dir <DIR>` | Compatibility alias for `--input <DIR>`. |
 | `-o, --output <PATH/DIR>` | Output Parquet path. When the input is a directory, this must be a directory and files are written with their original names. |
+| `--output-invalid <PATH/DIR>` | Optional Parquet output for rejected rows. When the input is a directory, this must be a directory and mirrors the input file names. |
 | `-c, --column <NAME>` | Name of the text column to inspect. Defaults to `transcription`. |
 | `-l, --lang <LANG>` | Target language to keep. Repeat the flag to allow multiple languages. ISO codes, common aliases, and full names (case-insensitive) are accepted. Default: `uk`. |
+| `--threshold <FLOAT>` | Minimum confidence required for the top detected language to be kept. Must be between `0.0` and `1.0`. Default: `0.6`. |
 | `--keep-empty` | Preserve rows where the text column is `NULL` or an empty string. |
 | `--clean` | Normalize whitespace and strip non-letter/non-punctuation symbols before detection; the cleaned text replaces the original column in the output. |
-| `--threads <N>` | Limit the Rayon thread pool to `N` workers if you need deterministic parallelism. |
+| `--threads <N>` | Set the Rayon thread pool size. Defaults to the current core count. |
 
 The output Parquet schema matches the input schema; when `--clean` is supplied the specified text column is replaced with the cleaned content.
 

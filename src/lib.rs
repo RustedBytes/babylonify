@@ -13,18 +13,22 @@ use std::sync::Arc;
 pub fn run(cli: Cli) -> Result<()> {
     init_logging();
 
-    if let Some(n) = cli.threads {
-        info!("configuring Rayon thread pool with {n} threads");
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(n)
-            .build_global()
-            .with_context(|| format!("Failed to configure Rayon thread pool with {n} threads"))?;
-    }
+    info!("configuring Rayon thread pool with {} threads", cli.threads);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(cli.threads)
+        .build_global()
+        .with_context(|| {
+            format!(
+                "Failed to configure Rayon thread pool with {} threads",
+                cli.threads
+            )
+        })?;
 
     let target_langs = detect::parse_languages(&cli.lang)?;
     info!(
-        "keeping rows matching {} target language(s)",
-        target_langs.len()
+        "keeping rows matching {} target language(s) with confidence threshold {}",
+        target_langs.len(),
+        cli.threshold
     );
     info!("building language detector");
     let detector = Arc::new(detect::build_detector());

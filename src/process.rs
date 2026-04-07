@@ -12,6 +12,18 @@ use std::{
     sync::Arc,
 };
 
+struct Summary<'a> {
+    input_path: &'a Path,
+    output_path: &'a Path,
+    invalid_output_path: Option<&'a Path>,
+    total_rows: usize,
+    kept_rows: usize,
+    invalid_rows: usize,
+    target_langs: &'a HashSet<Language>,
+    cleaned: bool,
+    threshold: f64,
+}
+
 pub fn process_input(
     cli: &Cli,
     target_langs: &HashSet<Language>,
@@ -20,11 +32,25 @@ pub fn process_input(
     match (&cli.input, &cli.input_dir) {
         (Some(input_path), None) => {
             info!("processing input path '{}'", input_path.display());
-            process_input_path(input_path, &cli.output, cli, target_langs, detector)
+            process_input_path(
+                input_path,
+                &cli.output,
+                cli.output_invalid.as_deref(),
+                cli,
+                target_langs,
+                detector,
+            )
         }
         (None, Some(input_dir)) => {
             info!("processing input directory '{}'", input_dir.display());
-            process_directory(input_dir, &cli.output, cli, target_langs, detector)
+            process_directory(
+                input_dir,
+                &cli.output,
+                cli.output_invalid.as_deref(),
+                cli,
+                target_langs,
+                detector,
+            )
         }
         _ => unreachable!("clap enforces that exactly one input source is provided"),
     }
@@ -33,6 +59,7 @@ pub fn process_input(
 fn process_input_path(
     input_path: &Path,
     output_path: &Path,
+    invalid_output_path: Option<&Path>,
     cli: &Cli,
     target_langs: &HashSet<Language>,
     detector: &Arc<LanguageDetector>,
@@ -45,9 +72,23 @@ fn process_input_path(
     })?;
 
     if metadata.is_dir() {
-        process_directory(input_path, output_path, cli, target_langs, detector)
+        process_directory(
+            input_path,
+            output_path,
+            invalid_output_path,
+            cli,
+            target_langs,
+            detector,
+        )
     } else if metadata.is_file() {
-        process_file(input_path, output_path, cli, target_langs, detector)
+        process_file(
+            input_path,
+            output_path,
+            invalid_output_path,
+            cli,
+            target_langs,
+            detector,
+        )
     } else {
         Err(anyhow!(
             "Input path '{}' must be a Parquet file or a directory containing Parquet files",
@@ -59,11 +100,15 @@ fn process_input_path(
 fn process_directory(
     input_dir: &Path,
     output_dir: &Path,
+    invalid_output_dir: Option<&Path>,
     cli: &Cli,
     target_langs: &HashSet<Language>,
     detector: &Arc<LanguageDetector>,
 ) -> Result<()> {
     ensure_output_directory(output_dir)?;
+    if let Some(invalid_output_dir) = invalid_output_dir {
+        ensure_output_directory(invalid_output_dir)?;
+    }
 
     let files = collect_parquet_files(input_dir)?;
     info!(
@@ -73,7 +118,17 @@ fn process_directory(
     );
     for input_path in files {
         let output_path = output_path_for_file(output_dir, &input_path)?;
-        process_file(&input_path, &output_path, cli, target_langs, detector)?;
+        let invalid_output_path = invalid_output_dir
+            .map(|invalid_output_dir| output_path_for_file(invalid_output_dir, &input_path))
+            .transpose()?;
+        process_file(
+            &input_path,
+            &output_path,
+            invalid_output_path.as_deref(),
+            cli,
+            target_langs,
+            detector,
+        )?;
     }
 
     Ok(())
@@ -142,15 +197,22 @@ fn output_path_for_file(output_dir: &Path, input_path: &Path) -> Result<PathBuf>
 fn process_file(
     input_path: &Path,
     output_path: &Path,
+    invalid_output_path: Option<&Path>,
     cli: &Cli,
     target_langs: &HashSet<Language>,
     detector: &Arc<LanguageDetector>,
 ) -> Result<()> {
-    if output_path.exists() && output_path.is_dir() {
-        return Err(anyhow!(
-            "Output path '{:?}' points to a directory. Provide a file path instead.",
-            output_path
-        ));
+    ensure_file_output_path(output_path)?;
+    if let Some(invalid_output_path) = invalid_output_path {
+        ensure_file_output_path(invalid_output_path)?;
+
+        if output_path == invalid_output_path {
+            return Err(anyhow!(
+                "Output path '{}' and invalid output path '{}' must be different",
+                output_path.display(),
+                invalid_output_path.display()
+            ));
+        }
     }
 
     info!(
@@ -160,22 +222,41 @@ fn process_file(
     );
     let df = read_parquet(input_path)?;
     let processed = process_column(&df, cli)?;
-    let mask = build_mask(&processed, cli.keep_empty, target_langs, detector);
+    let mask = build_mask(
+        &processed,
+        cli.keep_empty,
+        cli.threshold,
+        target_langs,
+        detector,
+    );
     let mut filtered = filter_dataframe(&df, &mask)?;
+    let invalid_mask = invert_mask(&mask);
+    let mut invalid = invalid_output_path
+        .map(|_| filter_dataframe(&df, &invalid_mask))
+        .transpose()?;
 
     if cli.clean {
-        replace_text_column(&mut filtered, &cli.column, processed, &mask)?;
+        replace_text_column(&mut filtered, &cli.column, &processed, &mask)?;
+        if let Some(invalid) = invalid.as_mut() {
+            replace_text_column(invalid, &cli.column, &processed, &invalid_mask)?;
+        }
     }
 
     write_parquet(output_path, &mut filtered)?;
-    print_summary(
+    if let Some((invalid_output_path, invalid)) = invalid_output_path.zip(invalid.as_mut()) {
+        write_parquet(invalid_output_path, invalid)?;
+    }
+    print_summary(Summary {
         input_path,
         output_path,
-        mask.len(),
-        filtered.height(),
+        invalid_output_path,
+        total_rows: mask.len(),
+        kept_rows: filtered.height(),
+        invalid_rows: invalid.as_ref().map_or(0, DataFrame::height),
         target_langs,
-        cli.clean,
-    );
+        cleaned: cli.clean,
+        threshold: cli.threshold,
+    });
 
     Ok(())
 }
@@ -210,6 +291,7 @@ fn process_column(df: &DataFrame, cli: &Cli) -> Result<Vec<Option<String>>> {
 fn build_mask(
     processed: &[Option<String>],
     keep_empty: bool,
+    threshold: f64,
     target_langs: &HashSet<Language>,
     detector: &Arc<LanguageDetector>,
 ) -> Vec<bool> {
@@ -218,12 +300,23 @@ fn build_mask(
         .map(|opt_text| match opt_text {
             None => keep_empty,
             Some(text) if text.is_empty() => keep_empty,
-            Some(text) => detector
-                .detect_language_of(text)
-                .map(|lang| target_langs.contains(&lang))
-                .unwrap_or(false),
+            Some(text) => matches_threshold(text, threshold, target_langs, detector),
         })
         .collect()
+}
+
+fn matches_threshold(
+    text: &str,
+    threshold: f64,
+    target_langs: &HashSet<Language>,
+    detector: &Arc<LanguageDetector>,
+) -> bool {
+    detector
+        .compute_language_confidence_values(text)
+        .into_iter()
+        .next()
+        .map(|(language, confidence)| target_langs.contains(&language) && confidence >= threshold)
+        .unwrap_or(false)
 }
 
 fn filter_dataframe(df: &DataFrame, mask: &[bool]) -> Result<DataFrame> {
@@ -231,19 +324,35 @@ fn filter_dataframe(df: &DataFrame, mask: &[bool]) -> Result<DataFrame> {
     Ok(df.filter(&mask)?)
 }
 
+fn invert_mask(mask: &[bool]) -> Vec<bool> {
+    mask.iter().map(|keep| !keep).collect()
+}
+
 fn replace_text_column(
     filtered: &mut DataFrame,
     column_name: &str,
-    processed: Vec<Option<String>>,
+    processed: &[Option<String>],
     mask: &[bool],
 ) -> Result<()> {
     let cleaned_filtered: Vec<Option<String>> = processed
-        .into_iter()
+        .iter()
+        .cloned()
         .zip(mask.iter())
         .filter_map(|(value, keep)| if *keep { Some(value) } else { None })
         .collect();
     let cleaned_series = Series::new(column_name.into(), cleaned_filtered);
     filtered.with_column(cleaned_series)?;
+    Ok(())
+}
+
+fn ensure_file_output_path(output_path: &Path) -> Result<()> {
+    if output_path.exists() && output_path.is_dir() {
+        return Err(anyhow!(
+            "Output path '{:?}' points to a directory. Provide a file path instead.",
+            output_path
+        ));
+    }
+
     Ok(())
 }
 
@@ -256,21 +365,29 @@ fn write_parquet(output_path: &Path, filtered: &mut DataFrame) -> Result<()> {
     Ok(())
 }
 
-fn print_summary(
-    input_path: &Path,
-    output_path: &Path,
-    total_rows: usize,
-    kept_rows: usize,
-    target_langs: &HashSet<Language>,
-    cleaned: bool,
-) {
-    println!(
-        "✅ Filtered {} rows -> {} rows kept (langs = {:?}, cleaned = {}) [{} -> {}]",
-        total_rows,
-        kept_rows,
-        target_langs,
-        cleaned,
-        input_path.display(),
-        output_path.display()
-    );
+fn print_summary(summary: Summary<'_>) {
+    match summary.invalid_output_path {
+        Some(invalid_output_path) => println!(
+            "✅ Filtered {} rows -> {} rows kept, {} rows rejected (langs = {:?}, cleaned = {}, threshold = {}) [{} -> {}, invalid -> {}]",
+            summary.total_rows,
+            summary.kept_rows,
+            summary.invalid_rows,
+            summary.target_langs,
+            summary.cleaned,
+            summary.threshold,
+            summary.input_path.display(),
+            summary.output_path.display(),
+            invalid_output_path.display()
+        ),
+        None => println!(
+            "✅ Filtered {} rows -> {} rows kept (langs = {:?}, cleaned = {}, threshold = {}) [{} -> {}]",
+            summary.total_rows,
+            summary.kept_rows,
+            summary.target_langs,
+            summary.cleaned,
+            summary.threshold,
+            summary.input_path.display(),
+            summary.output_path.display()
+        ),
+    }
 }

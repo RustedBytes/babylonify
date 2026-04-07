@@ -92,6 +92,47 @@ fn read_parquet(path: &Path) -> PolarsResult<DataFrame> {
 }
 
 #[test]
+fn writes_invalid_rows_for_single_file() {
+    let tmp = tempdir().unwrap();
+    let in_path = tmp.path().join("in.parquet");
+    let out_path = tmp.path().join("valid.parquet");
+    let invalid_path = tmp.path().join("invalid.parquet");
+
+    write_input_parquet(&in_path).unwrap();
+
+    let mut cmd = Command::cargo_bin("babylonify").unwrap();
+    cmd.arg("-i")
+        .arg(&in_path)
+        .arg("-o")
+        .arg(&out_path)
+        .arg("--output-invalid")
+        .arg(&invalid_path)
+        .arg("-l")
+        .arg("uk");
+
+    cmd.assert()
+        .success()
+        .stdout(contains("rows rejected"))
+        .stdout(contains("invalid ->"));
+
+    let valid = read_parquet(&out_path).unwrap();
+    let invalid = read_parquet(&invalid_path).unwrap();
+
+    assert_eq!(valid.height(), 2);
+    assert_eq!(invalid.height(), 3);
+    let invalid_texts: Vec<_> = invalid
+        .column("transcription")
+        .unwrap()
+        .str()
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert!(invalid_texts.iter().any(|t| t == &Some("Hello, world!")));
+    assert!(invalid_texts.iter().any(|t| t == &Some("")));
+    assert!(invalid_texts.iter().any(|t| t.is_none()));
+}
+
+#[test]
 fn keeps_only_ukrainian_by_default() {
     let tmp = tempdir().unwrap();
     let in_path = tmp.path().join("in.parquet");
@@ -165,7 +206,9 @@ fn keeps_rows_matching_any_requested_language() {
         .arg("-l")
         .arg("uk")
         .arg("-l")
-        .arg("en");
+        .arg("en")
+        .arg("--threshold")
+        .arg("0.0");
 
     cmd.assert().success().stdout(contains("langs ="));
 
@@ -239,7 +282,9 @@ fn processes_directory_passed_via_input_flag() {
         .arg("-l")
         .arg("uk")
         .arg("-l")
-        .arg("en");
+        .arg("en")
+        .arg("--threshold")
+        .arg("0.0");
 
     cmd.assert().success();
 
@@ -252,6 +297,40 @@ fn processes_directory_passed_via_input_flag() {
     for output in [&out_first, &out_second] {
         let df = read_parquet(output).unwrap();
         assert_eq!(df.height(), 3);
+    }
+}
+
+#[test]
+fn writes_invalid_rows_for_directory_processing() {
+    let tmp = tempdir().unwrap();
+    let input_dir = tmp.path().join("inputs");
+    let output_dir = tmp.path().join("valid");
+    let invalid_dir = tmp.path().join("invalid");
+
+    fs::create_dir_all(&input_dir).unwrap();
+
+    let first = input_dir.join("first.parquet");
+    let second = input_dir.join("second.parquet");
+    write_input_parquet(&first).unwrap();
+    write_input_parquet(&second).unwrap();
+
+    let mut cmd = Command::cargo_bin("babylonify").unwrap();
+    cmd.arg("--input-dir")
+        .arg(&input_dir)
+        .arg("-o")
+        .arg(&output_dir)
+        .arg("--output-invalid")
+        .arg(&invalid_dir)
+        .arg("-l")
+        .arg("uk");
+
+    cmd.assert().success();
+
+    for output in ["first.parquet", "second.parquet"] {
+        let valid = read_parquet(&output_dir.join(output)).unwrap();
+        let invalid = read_parquet(&invalid_dir.join(output)).unwrap();
+        assert_eq!(valid.height(), 2);
+        assert_eq!(invalid.height(), 3);
     }
 }
 
