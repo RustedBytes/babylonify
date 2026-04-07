@@ -2,6 +2,7 @@ use crate::cli::Cli;
 use crate::text::clean_text;
 use anyhow::{Context, Result, anyhow};
 use lingua::{Language, LanguageDetector};
+use log::info;
 use polars::prelude::*;
 use rayon::prelude::*;
 use std::{
@@ -18,9 +19,11 @@ pub fn process_input(
 ) -> Result<()> {
     match (&cli.input, &cli.input_dir) {
         (Some(input_path), None) => {
+            info!("processing input path '{}'", input_path.display());
             process_input_path(input_path, &cli.output, cli, target_langs, detector)
         }
         (None, Some(input_dir)) => {
+            info!("processing input directory '{}'", input_dir.display());
             process_directory(input_dir, &cli.output, cli, target_langs, detector)
         }
         _ => unreachable!("clap enforces that exactly one input source is provided"),
@@ -63,6 +66,11 @@ fn process_directory(
     ensure_output_directory(output_dir)?;
 
     let files = collect_parquet_files(input_dir)?;
+    info!(
+        "found {} Parquet file(s) under '{}'",
+        files.len(),
+        input_dir.display()
+    );
     for input_path in files {
         let output_path = output_path_for_file(output_dir, &input_path)?;
         process_file(&input_path, &output_path, cli, target_langs, detector)?;
@@ -145,6 +153,11 @@ fn process_file(
         ));
     }
 
+    info!(
+        "filtering '{}' into '{}'",
+        input_path.display(),
+        output_path.display()
+    );
     let df = read_parquet(input_path)?;
     let processed = process_column(&df, cli)?;
     let mask = build_mask(&processed, cli.keep_empty, target_langs, detector);
