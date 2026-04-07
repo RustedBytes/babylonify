@@ -186,6 +186,44 @@ fn processes_all_parquet_files_in_directory() {
 }
 
 #[test]
+fn processes_directory_passed_via_input_flag() {
+    let tmp = tempdir().unwrap();
+    let input_dir = tmp.path().join("inputs");
+    let output_dir = tmp.path().join("filtered");
+
+    fs::create_dir_all(&input_dir).unwrap();
+
+    let first = input_dir.join("first.parquet");
+    let second = input_dir.join("second.parquet");
+
+    write_input_parquet(&first).unwrap();
+    write_input_parquet(&second).unwrap();
+
+    let mut cmd = Command::cargo_bin("babylonify").unwrap();
+    cmd.arg("--input")
+        .arg(&input_dir)
+        .arg("-o")
+        .arg(&output_dir)
+        .arg("-l")
+        .arg("uk")
+        .arg("-l")
+        .arg("en");
+
+    cmd.assert().success();
+
+    let out_first = output_dir.join("first.parquet");
+    let out_second = output_dir.join("second.parquet");
+
+    assert!(out_first.exists());
+    assert!(out_second.exists());
+
+    for output in [&out_first, &out_second] {
+        let df = read_parquet(output).unwrap();
+        assert_eq!(df.height(), 3);
+    }
+}
+
+#[test]
 fn clean_flag_removes_non_letter_characters() {
     let tmp = tempdir().unwrap();
     let in_path = tmp.path().join("in.parquet");

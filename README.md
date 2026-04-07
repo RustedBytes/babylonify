@@ -33,10 +33,10 @@ babylonify \
   --clean
 ```
 
-Batch-process every Parquet file in a directory. Outputs reuse the input file names within the provided output directory:
+Batch-process every Parquet file in a directory by pointing `--input` at the folder. Outputs reuse the input file names within the provided output directory:
 ```bash
 babylonify \
-  --input-dir data/raw/ \
+  --input data/raw/ \
   --output data/filtered/ \
   --lang english
 ```
@@ -44,7 +44,7 @@ babylonify \
 Keep several languages by repeating `--lang`:
 ```bash
 babylonify \
-  --input-dir cv22-opus-speech/ \
+  --input cv22-opus-speech/ \
   --output cv22-opus-speech-filtered \
   --lang uk \
   --lang en \
@@ -57,9 +57,9 @@ Run `babylonify --help` for the authoritative list. The most important options a
 
 | Flag | Description |
 | ---- | ----------- |
-| `-i, --input <PATH>` | Parquet file to filter. Mutually exclusive with `--input-dir`. |
-| `--input-dir <DIR>` | Process every Parquet file in a directory (recursively only across the top level). |
-| `-o, --output <PATH|DIR>` | Output Parquet path. When used with `--input-dir`, this must be a directory and files are written with their original names. |
+| `-i, --input <PATH>` | Parquet file to filter, or a directory of Parquet files to batch-process. |
+| `--input-dir <DIR>` | Compatibility alias for `--input <DIR>`. |
+| `-o, --output <PATH|DIR>` | Output Parquet path. When the input is a directory, this must be a directory and files are written with their original names. |
 | `-c, --column <NAME>` | Name of the text column to inspect. Defaults to `transcription`. |
 | `-l, --lang <LANG>` | Target language to keep. Repeat the flag to allow multiple languages. ISO codes, common aliases, and full names (case-insensitive) are accepted. Default: `uk`. |
 | `--keep-empty` | Preserve rows where the text column is `NULL` or an empty string. |

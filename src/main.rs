@@ -31,11 +31,11 @@ use std::{
     group(ArgGroup::new("input_source").required(true).args(&["input", "input_dir"]))
 )]
 struct Cli {
-    /// Input Parquet file path
-    #[arg(short, long, value_hint = ValueHint::FilePath)]
+    /// Input Parquet file path or directory containing Parquet files
+    #[arg(short, long, value_hint = ValueHint::AnyPath)]
     input: Option<PathBuf>,
 
-    /// Input directory with Parquet files
+    /// Input directory with Parquet files (compatibility alias for --input <DIR>)
     #[arg(long, value_hint = ValueHint::DirPath)]
     input_dir: Option<PathBuf>,
 
@@ -137,7 +137,7 @@ fn main() -> Result<()> {
 
     match (&cli.input, &cli.input_dir) {
         (Some(input_path), None) => {
-            process_file(input_path, &cli.output, &cli, &target_langs, &detector)?
+            process_input_path(input_path, &cli.output, &cli, &target_langs, &detector)?
         }
         (None, Some(input_dir)) => {
             process_directory(input_dir, &cli.output, &cli, &target_langs, &detector)?
@@ -146,6 +146,32 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn process_input_path(
+    input_path: &Path,
+    output_path: &Path,
+    cli: &Cli,
+    target_langs: &HashSet<Language>,
+    detector: &Arc<LanguageDetector>,
+) -> Result<()> {
+    let metadata = fs::metadata(input_path).with_context(|| {
+        format!(
+            "Input path '{}' does not exist or is inaccessible",
+            input_path.display()
+        )
+    })?;
+
+    if metadata.is_dir() {
+        process_directory(input_path, output_path, cli, target_langs, detector)
+    } else if metadata.is_file() {
+        process_file(input_path, output_path, cli, target_langs, detector)
+    } else {
+        Err(anyhow!(
+            "Input path '{}' must be a Parquet file or a directory containing Parquet files",
+            input_path.display()
+        ))
+    }
 }
 
 fn process_directory(
@@ -158,7 +184,7 @@ fn process_directory(
     if output_dir.exists() {
         if !output_dir.is_dir() {
             return Err(anyhow!(
-                "Output path '{:?}' must be a directory when --input-dir is used",
+                "Output path '{:?}' must be a directory when the input is a directory",
                 output_dir
             ));
         }
