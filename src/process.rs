@@ -367,8 +367,8 @@ fn write_parquet(output_path: &Path, filtered: &mut DataFrame) -> Result<()> {
 
 fn print_summary(summary: Summary<'_>) {
     match summary.invalid_output_path {
-        Some(invalid_output_path) => println!(
-            "✅ Filtered {} rows -> {} rows kept, {} rows rejected (langs = {:?}, cleaned = {}, threshold = {}) [{} -> {}, invalid -> {}]",
+        Some(invalid_output_path) => info!(
+            "Filtered {} rows -> {} rows kept, {} rows rejected (langs = {:?}, cleaned = {}, threshold = {}) [{} -> {}, invalid -> {}]",
             summary.total_rows,
             summary.kept_rows,
             summary.invalid_rows,
@@ -379,8 +379,8 @@ fn print_summary(summary: Summary<'_>) {
             summary.output_path.display(),
             invalid_output_path.display()
         ),
-        None => println!(
-            "✅ Filtered {} rows -> {} rows kept (langs = {:?}, cleaned = {}, threshold = {}) [{} -> {}]",
+        None => info!(
+            "Filtered {} rows -> {} rows kept (langs = {:?}, cleaned = {}, threshold = {}) [{} -> {}]",
             summary.total_rows,
             summary.kept_rows,
             summary.target_langs,

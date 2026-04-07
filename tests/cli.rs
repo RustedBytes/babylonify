@@ -108,12 +108,13 @@ fn writes_invalid_rows_for_single_file() {
         .arg("--output-invalid")
         .arg(&invalid_path)
         .arg("-l")
-        .arg("uk");
+        .arg("uk")
+        .env("RUST_LOG", "info");
 
     cmd.assert()
         .success()
-        .stdout(contains("rows rejected"))
-        .stdout(contains("invalid ->"));
+        .stderr(contains("rows rejected"))
+        .stderr(contains("invalid ->"));
 
     let valid = read_parquet(&out_path).unwrap();
     let invalid = read_parquet(&invalid_path).unwrap();
@@ -147,12 +148,14 @@ fn keeps_only_ukrainian_by_default() {
         .arg("-o")
         .arg(&out_path)
         .arg("-l")
-        .arg("uk");
+        .arg("uk")
+        .env("RUST_LOG", "info");
 
     cmd.assert()
         .success()
-        .stdout(contains("✅ Filtered"))
-        .stderr(contains("")); // no specific stderr expected
+        .stderr(contains("Filtered"))
+        .stderr(contains("langs ="))
+        .stderr(contains("cleaned = false"));
 
     let df = read_parquet(&out_path).unwrap();
     // Expect rows: #0 and #2 (both Ukrainian). #3 (null) and #4 (empty) are dropped without --keep-empty.
@@ -208,9 +211,10 @@ fn keeps_rows_matching_any_requested_language() {
         .arg("-l")
         .arg("en")
         .arg("--threshold")
-        .arg("0.0");
+        .arg("0.0")
+        .env("RUST_LOG", "info");
 
-    cmd.assert().success().stdout(contains("langs ="));
+    cmd.assert().success().stderr(contains("langs ="));
 
     let df = read_parquet(&out_path).unwrap();
     assert_eq!(df.height(), 3);
@@ -349,9 +353,10 @@ fn clean_flag_removes_non_letter_characters() {
         .arg(&out_path)
         .arg("-l")
         .arg("uk")
-        .arg("--clean");
+        .arg("--clean")
+        .env("RUST_LOG", "info");
 
-    cmd.assert().success().stdout(contains("cleaned = true"));
+    cmd.assert().success().stderr(contains("cleaned = true"));
 
     let df = read_parquet(&out_path).unwrap();
     assert_eq!(df.height(), 2);
@@ -453,9 +458,10 @@ fn processes_parquet_files_with_struct_columns() {
         .arg("-o")
         .arg(&out_path)
         .arg("-l")
-        .arg("uk");
+        .arg("uk")
+        .env("RUST_LOG", "info");
 
-    cmd.assert().success().stdout(contains("✅ Filtered"));
+    cmd.assert().success().stderr(contains("Filtered"));
 
     let df = read_parquet(&out_path).unwrap();
     assert_eq!(df.height(), 2);
