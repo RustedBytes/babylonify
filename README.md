@@ -72,8 +72,9 @@ The output Parquet schema matches the input schema; when `--clean` is supplied t
 Short codes and localized names for Ukrainian, English, Russian, Polish, German, French, and Spanish are recognized. Any other lingua-supported language can be addressed using its English enum name (for example `italian`, `portuguese`). Unknown values yield a helpful error.
 
 ## Development
-- Run the test suite: `cargo test`.
-- Format and lint with the Rust standard tooling: `cargo fmt` and `cargo clippy`.
+- Format the codebase: `cargo fmt --all`.
+- Lint all targets and features: `cargo clippy --all-targets --all-features -- -D warnings`.
+- Run the full test suite: `cargo test --all-features`.
 - The integration tests under `tests/cli.rs` exercise the end-to-end CLI against synthetic Parquet fixtures.
 
 ## License

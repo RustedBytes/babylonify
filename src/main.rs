@@ -129,7 +129,7 @@ fn main() -> Result<()> {
         rayon::ThreadPoolBuilder::new()
             .num_threads(n)
             .build_global()
-            .ok();
+            .with_context(|| format!("Failed to configure Rayon thread pool with {n} threads"))?;
     }
 
     let target_langs = parse_languages(&cli.lang)?;
