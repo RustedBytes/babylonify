@@ -3,7 +3,7 @@
 Babylonify filters rows in a Parquet file (or an entire directory of Parquet files) by the language detected in a text column. It wraps [lingua](https://github.com/pemistahl/lingua-rs) for language detection, [polars](https://pola.rs) for columnar IO, and [Rayon](https://github.com/rayon-rs/rayon) for parallelism, producing compressed Parquet output with Zstandard.
 
 ## Highlights
-- Detects the language for every row and retains only those matching the requested language.
+- Detects the language for every row and retains only those matching one of the requested languages.
 - Accepts both ISO 639-1 codes (`uk`, `en`, `ru`, …) and language names (`Ukrainian`, `English`, `русский`, …).
 - Optional cleaning step removes numbers/emojis/symbols before detection so you can focus on alphabetic content.
 - Scales to many files: point the CLI at a directory and it mirrors the structure to an output directory.
@@ -41,6 +41,17 @@ babylonify \
   --lang english
 ```
 
+Keep several languages by repeating `--lang`:
+```bash
+babylonify \
+  --input-dir cv22-opus-speech/ \
+  --output cv22-opus-speech-filtered \
+  --lang uk \
+  --lang en \
+  --lang ru \
+  --clean
+```
+
 ## CLI reference
 Run `babylonify --help` for the authoritative list. The most important options are:
 
@@ -50,7 +61,7 @@ Run `babylonify --help` for the authoritative list. The most important options a
 | `--input-dir <DIR>` | Process every Parquet file in a directory (recursively only across the top level). |
 | `-o, --output <PATH|DIR>` | Output Parquet path. When used with `--input-dir`, this must be a directory and files are written with their original names. |
 | `-c, --column <NAME>` | Name of the text column to inspect. Defaults to `transcription`. |
-| `-l, --lang <LANG>` | Target language to keep. ISO codes, common aliases, and full names (case-insensitive) are accepted. Default: `uk`. |
+| `-l, --lang <LANG>` | Target language to keep. Repeat the flag to allow multiple languages. ISO codes, common aliases, and full names (case-insensitive) are accepted. Default: `uk`. |
 | `--keep-empty` | Preserve rows where the text column is `NULL` or an empty string. |
 | `--clean` | Normalize whitespace and strip non-letter/non-punctuation symbols before detection; the cleaned text replaces the original column in the output. |
 | `--threads <N>` | Limit the Rayon thread pool to `N` workers if you need deterministic parallelism. |

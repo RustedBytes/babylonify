@@ -6,6 +6,7 @@ use polars::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
 use std::{
+    collections::HashSet,
     fs::{self, File},
     path::{Path, PathBuf},
     sync::Arc,
@@ -46,9 +47,9 @@ struct Cli {
     #[arg(short = 'c', long, default_value = "transcription")]
     column: String,
 
-    /// Target language (ISO 639-1 or name: uk, en, ru, Ukrainian, etc.)
-    #[arg(short = 'l', long, default_value = "uk")]
-    lang: String,
+    /// Target language(s) to keep. Repeat the flag to allow multiple languages.
+    #[arg(short = 'l', long, action = ArgAction::Append)]
+    lang: Vec<String>,
 
     /// Optional: set Rayon thread count
     #[arg(long)]
@@ -86,6 +87,19 @@ fn build_detector() -> LanguageDetector {
         .build()
 }
 
+fn parse_languages(codes: &[String]) -> Result<HashSet<Language>> {
+    let codes = if codes.is_empty() {
+        vec!["uk".to_string()]
+    } else {
+        codes.to_vec()
+    };
+
+    codes
+        .into_iter()
+        .map(|code| parse_language(&code))
+        .collect()
+}
+
 /// Remove all symbols except letters, spaces, and punctuation for Ukrainian, Russian, and English texts.
 fn clean_text(text: &str) -> String {
     static WHITESPACE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").unwrap());
@@ -118,15 +132,15 @@ fn main() -> Result<()> {
             .ok();
     }
 
-    let target_lang = parse_language(&cli.lang)?;
+    let target_langs = parse_languages(&cli.lang)?;
     let detector = Arc::new(build_detector());
 
     match (&cli.input, &cli.input_dir) {
         (Some(input_path), None) => {
-            process_file(input_path, &cli.output, &cli, target_lang, &detector)?
+            process_file(input_path, &cli.output, &cli, &target_langs, &detector)?
         }
         (None, Some(input_dir)) => {
-            process_directory(input_dir, &cli.output, &cli, target_lang, &detector)?
+            process_directory(input_dir, &cli.output, &cli, &target_langs, &detector)?
         }
         _ => unreachable!("clap enforces that exactly one input source is provided"),
     }
@@ -138,7 +152,7 @@ fn process_directory(
     input_dir: &Path,
     output_dir: &Path,
     cli: &Cli,
-    target_lang: Language,
+    target_langs: &HashSet<Language>,
     detector: &Arc<LanguageDetector>,
 ) -> Result<()> {
     if output_dir.exists() {
@@ -190,7 +204,7 @@ fn process_directory(
             .file_name()
             .ok_or_else(|| anyhow!("Invalid file name for '{:?}'", input_path))?;
         let output_path = output_dir.join(file_name);
-        process_file(&input_path, &output_path, cli, target_lang, detector)?;
+        process_file(&input_path, &output_path, cli, target_langs, detector)?;
     }
 
     Ok(())
@@ -200,7 +214,7 @@ fn process_file(
     input_path: &Path,
     output_path: &Path,
     cli: &Cli,
-    target_lang: Language,
+    target_langs: &HashSet<Language>,
     detector: &Arc<LanguageDetector>,
 ) -> Result<()> {
     if output_path.exists() && output_path.is_dir() {
@@ -241,7 +255,10 @@ fn process_file(
         .map(|opt_text| match opt_text {
             None => cli.keep_empty,
             Some(t) if t.is_empty() => cli.keep_empty,
-            Some(t) => detector.detect_language_of(t) == Some(target_lang),
+            Some(t) => detector
+                .detect_language_of(t)
+                .map(|lang| target_langs.contains(&lang))
+                .unwrap_or(false),
         })
         .collect();
 
@@ -267,10 +284,10 @@ fn process_file(
         .finish(&mut filtered)?;
 
     println!(
-        "✅ Filtered {} rows -> {} rows kept (lang = {:?}, cleaned = {}) [{} -> {}]",
+        "✅ Filtered {} rows -> {} rows kept (langs = {:?}, cleaned = {}) [{} -> {}]",
         mask.len(),
         filtered.height(),
-        target_lang,
+        target_langs,
         cli.clean,
         input_path.display(),
         output_path.display()
@@ -300,6 +317,23 @@ mod tests {
         let err = parse_language("xx").unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("Unknown language"));
+    }
+
+    #[test]
+    fn parse_languages_defaults_to_ukrainian() {
+        let langs = parse_languages(&[]).unwrap();
+        assert_eq!(langs.len(), 1);
+        assert!(langs.contains(&Language::Ukrainian));
+    }
+
+    #[test]
+    fn parse_languages_supports_multiple_values() {
+        let langs =
+            parse_languages(&["uk".to_string(), "en".to_string(), "ru".to_string()]).unwrap();
+        assert_eq!(langs.len(), 3);
+        assert!(langs.contains(&Language::Ukrainian));
+        assert!(langs.contains(&Language::English));
+        assert!(langs.contains(&Language::Russian));
     }
 
     #[test]

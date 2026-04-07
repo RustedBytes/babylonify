@@ -118,6 +118,35 @@ fn keep_empty_retains_null_and_empty_rows() {
 }
 
 #[test]
+fn keeps_rows_matching_any_requested_language() {
+    let tmp = tempdir().unwrap();
+    let in_path = tmp.path().join("in.parquet");
+    let out_path = tmp.path().join("out.parquet");
+
+    write_input_parquet(&in_path).unwrap();
+
+    let mut cmd = Command::cargo_bin("babylonify").unwrap();
+    cmd.arg("-i")
+        .arg(&in_path)
+        .arg("-o")
+        .arg(&out_path)
+        .arg("-l")
+        .arg("uk")
+        .arg("-l")
+        .arg("en");
+
+    cmd.assert().success().stdout(contains("langs ="));
+
+    let df = read_parquet(&out_path).unwrap();
+    assert_eq!(df.height(), 3);
+    let col = df.column("transcription").unwrap().str().unwrap();
+    let texts: Vec<_> = col.into_iter().collect();
+    assert!(texts.iter().any(|t| t == &Some("Привіт світ!")));
+    assert!(texts.iter().any(|t| t == &Some("Привіт, Україно! 😊 123")));
+    assert!(texts.iter().any(|t| t == &Some("Hello, world!")));
+}
+
+#[test]
 fn processes_all_parquet_files_in_directory() {
     let tmp = tempdir().unwrap();
     let input_dir = tmp.path().join("inputs");
