@@ -53,6 +53,38 @@ fn write_custom_parquet(path: &Path, column: &str, values: &[Option<&str>]) -> P
         .map(|_| ())
 }
 
+fn write_struct_parquet(path: &Path) -> PolarsResult<()> {
+    let ids = vec![0i32, 1, 2];
+    let transcriptions = vec![
+        Some("Привіт світ!"),
+        Some("Hello, world!"),
+        Some("Привіт, світе!"),
+    ];
+    let sampling_rates = vec![Some(16_000i32), Some(16_000), None];
+    let audio_paths = vec![Some("clip-0.wav"), Some("clip-1.wav"), None];
+    let audio_bytes = vec![Some(&b"\x00\x01"[..]), Some(&b"\x02\x03"[..]), None];
+
+    let audio = DataFrame::new(vec![
+        Series::new("bytes".into(), audio_bytes).into(),
+        Series::new("sampling_rate".into(), sampling_rates).into(),
+        Series::new("path".into(), audio_paths).into(),
+    ])?
+    .into_struct("audio".into())
+    .into_series();
+
+    let mut df = DataFrame::new(vec![
+        Series::new("id".into(), ids).into(),
+        Series::new("transcription".into(), transcriptions).into(),
+        audio.into(),
+    ])?;
+
+    let mut f = File::create(path).expect("create struct input parquet");
+    ParquetWriter::new(&mut f)
+        .with_compression(ParquetCompression::Zstd(None))
+        .finish(&mut df)
+        .map(|_| ())
+}
+
 fn read_parquet(path: &Path) -> PolarsResult<DataFrame> {
     let file = File::open(path)?;
     let reader = ParquetReader::new(file);
@@ -326,4 +358,29 @@ fn fails_when_output_path_is_directory() {
         .failure()
         .stderr(contains("Output path"))
         .stderr(contains("Provide a file path"));
+}
+
+#[test]
+fn processes_parquet_files_with_struct_columns() {
+    let tmp = tempdir().unwrap();
+    let in_path = tmp.path().join("input.parquet");
+    let out_path = tmp.path().join("output.parquet");
+
+    write_struct_parquet(&in_path).unwrap();
+
+    let mut cmd = Command::cargo_bin("babylonify").unwrap();
+    cmd.arg("-i")
+        .arg(&in_path)
+        .arg("-o")
+        .arg(&out_path)
+        .arg("-l")
+        .arg("uk");
+
+    cmd.assert().success().stdout(contains("✅ Filtered"));
+
+    let df = read_parquet(&out_path).unwrap();
+    assert_eq!(df.height(), 2);
+
+    let audio = df.column("audio").unwrap();
+    assert!(matches!(audio.dtype(), DataType::Struct(_)));
 }
